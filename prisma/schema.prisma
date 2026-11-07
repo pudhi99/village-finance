@@ -1,0 +1,1519 @@
+// Prisma Schema — Village Finance Management System
+// Migration authority: Prisma Migrate (do not use Supabase CLI migrations)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// MODULE 1: USERS, ROLES, PERMISSIONS, SESSIONS & AUDIT
+// ============================================================
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+  INVITED
+}
+
+enum RoleName {
+  ADMIN
+  PARTNER
+  COLLECTION_TEAM
+  ACCOUNTANT
+}
+
+enum ScopeType {
+  ALL
+  LINE
+  VILLAGE
+}
+
+enum DeviceStatus {
+  ACTIVE
+  REVOKED
+}
+
+model UserProfile {
+  id        String     @id // Matches Supabase auth.users.id (UUID)
+  email     String     @unique
+  fullName  String
+  phone     String?
+  status    UserStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  userRoles           UserRole[]
+  dataScopes          UserDataScope[]
+  devices             DeviceRegistration[]
+  auditLogs           AuditLog[]           @relation("ActorAuditLogs")
+  userRolesGrantedBy  UserRole[]           @relation("RolesGrantedBy")
+
+  // Module 2 Relations
+  uploadedMedia       MediaAsset[]         @relation("UploaderMediaAssets")
+  capturedLocations   CustomerLocation[]   @relation("CapturedLocations")
+  assignedLines       CustomerLineAssignment[] @relation("LineAssignedBy")
+  verifiedDocuments   CustomerDocument[]   @relation("VerifiedDocuments")
+
+  // Module 3 Relations
+  appliedLoans        Loan[]               @relation("LoanApplicant")
+  loanApprovals       LoanApproval[]       @relation("LoanApprover")
+  disbursedLoans      LoanDisbursement[]   @relation("LoanDisburser")
+  cancelledLoans      LoanCancellation[]   @relation("LoanCanceller")
+  recordedRecoveries  RecoveryAllocation[] @relation("RecoveryRecorder")
+
+  // Module 4 Relations
+  collectedPayments   Payment[]            @relation("PaymentCollector")
+  reversedPayments    PaymentReversal[]    @relation("PaymentReverser")
+
+  // Module 5 Relations
+  openedSessions      CollectionSession[]  @relation("SessionOpener")
+  closedSessions      CollectionSession[]  @relation("SessionCloser")
+  sessionTeams        SessionTeamMember[]
+  recordedVisits      CollectionVisit[]    @relation("VisitCollector")
+  capturedGPSLogs     VisitGPSLog[]        @relation("GPSCollector")
+
+  // Module 6 Relations
+  openedCashBags          CashBagOpening[]     @relation("CashBagOpener")
+  cashLedgerEntries       CashLedgerEntry[]    @relation("CashLedgerActor")
+  performedReconciliations CashReconciliation[] @relation("ReconciliationPerformer")
+  approvedReconciliations CashReconciliation[] @relation("ReconciliationApprover")
+  initiatedTransfers      CashTransfer[]       @relation("TransferInitiator")
+  handedOverCash          CashHandover[]       @relation("CashHandedOverBy")
+  receivedCash            CashHandover[]       @relation("CashReceivedBy")
+  recordedExpenses        Expense[]            @relation("ExpenseRecorder")
+  approvedExpenses        Expense[]            @relation("ExpenseApprover")
+
+  // Module 7 Relations
+  partnerProfile            Partner?              @relation("UserPartnerProfile")
+  recordedCapitalEntries    PartnerCapitalEntry[] @relation("CapitalRecorder")
+  createdPartnerRatios      PartnerRatio[]        @relation("RatioCreator")
+  approvedWithdrawals       PartnerWithdrawal[]   @relation("WithdrawalApprover")
+  closedProfitPeriods       ProfitPeriod[]        @relation("ProfitPeriodCloser")
+  approvedProfitPeriods     ProfitPeriod[]        @relation("ProfitPeriodApprover")
+  postedProfitDistributions ProfitDistribution[]  @relation("ProfitDistributionPoster")
+  approvedLossPeriods       LossPeriod[]          @relation("LossPeriodApprover")
+  postedLossAllocations     LossAllocation[]      @relation("LossAllocationPoster")
+
+  // Module 8 Relations
+  notifications             Notification[]        @relation("UserNotifications")
+
+  // Module 9 Relations
+  collectorSyncConflicts    SyncConflict[]        @relation("CollectorSyncConflicts")
+  resolvedSyncConflicts     SyncConflict[]        @relation("ResolvedSyncConflicts")
+
+  @@index([status])
+  @@index([email])
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+}
+
+model Permission {
+  id          String   @id @default(uuid())
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+}
+
+model UserRole {
+  id        String   @id @default(uuid())
+  userId    String
+  roleId    String
+  grantedAt DateTime @default(now())
+  grantedBy String?
+
+  user      UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      Role         @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  granter   UserProfile? @relation("RolesGrantedBy", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String @id @default(uuid())
+  roleId       String
+  permissionId String
+
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+model UserDataScope {
+  id         String    @id @default(uuid())
+  userId     String
+  scopeType  ScopeType
+  scopeValue String    // Line ID, Village ID, or '*' for ALL
+  createdAt  DateTime  @default(now())
+
+  user       UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scopeType, scopeValue])
+  @@index([userId])
+}
+
+model DeviceRegistration {
+  id                String       @id @default(uuid())
+  userId            String
+  deviceFingerprint String
+  deviceName        String
+  status            DeviceStatus @default(ACTIVE)
+  lastSeenAt        DateTime     @default(now())
+  registeredAt      DateTime     @default(now())
+
+  user              UserProfile  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, deviceFingerprint])
+  @@index([userId])
+  @@index([deviceFingerprint])
+  @@index([status])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String   // e.g. USER_CREATED, ROLE_GRANTED, ROLE_REVOKED, USER_DISABLED, DEVICE_REVOKED, CUSTOMER_CREATED
+  entityType String   // e.g. UserProfile, UserRole, DeviceRegistration, Customer, CustomerAddress, CustomerLineAssignment
+  entityId   String
+  metadata   Json     @default("{}")
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  actor      UserProfile? @relation("ActorAuditLogs", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+// ============================================================
+// MODULE 2: VILLAGES, AREAS, CUSTOMERS, PHONES & LOCATIONS
+// ============================================================
+
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum PhoneType {
+  PRIMARY
+  SECONDARY
+  FAMILY
+  GUARANTOR
+}
+
+enum LocationSource {
+  DEVICE_GPS
+  MANUAL
+  GEOCODE
+}
+
+enum MediaStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum DocType {
+  PHOTO
+  AADHAAR
+  VOTER_ID
+  RATION_CARD
+  OTHER
+}
+
+enum Weekday {
+  SUNDAY
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+}
+
+enum SessionType {
+  MORNING
+  AFTERNOON
+}
+
+model Village {
+  id        String   @id @default(uuid())
+  name      String
+  code      String   @unique
+  district  String?
+  state     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  areas             Area[]
+  customers         Customer[]
+  customerAddresses CustomerAddress[]
+
+  @@index([name])
+}
+
+model Area {
+  id        String   @id @default(uuid())
+  villageId String
+  name      String
+  pincode   String?
+  landmark  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  village           Village           @relation(fields: [villageId], references: [id], onDelete: Cascade)
+  customers         Customer[]
+  customerAddresses CustomerAddress[]
+
+  @@unique([villageId, name])
+  @@index([villageId])
+}
+
+model Customer {
+  id                 String         @id @default(uuid())
+  customerNumber     String         @unique // e.g. VF-CUST-10001
+  fullName           String
+  fatherOrSpouseName String?
+  gender             String?
+  dateOfBirth        DateTime?
+  occupation         String?
+  monthlyIncomePaise Int?           // Stored in paise
+  status             CustomerStatus @default(ACTIVE)
+  villageId          String
+  areaId             String?
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  village         Village                  @relation(fields: [villageId], references: [id])
+  area            Area?                    @relation(fields: [areaId], references: [id])
+  phones          CustomerPhone[]
+  addresses       CustomerAddress[]
+  locations       CustomerLocation[]
+  documents       CustomerDocument[]
+  lineAssignments CustomerLineAssignment[]
+  loans           Loan[]
+  payments        Payment[]
+  advanceCreditEntries CustomerAdvanceCreditEntry[]
+  collectionVisits     CollectionVisit[]
+  visitGPSLogs         VisitGPSLog[]
+
+  @@index([villageId])
+  @@index([areaId])
+  @@index([status])
+  @@index([fullName])
+}
+
+model CustomerPhone {
+  id          String    @id @default(uuid())
+  customerId  String
+  phoneNumber String    @unique // Unique per customer: phone numbers are not shared
+  phoneType   PhoneType @default(PRIMARY)
+  ownerName   String?
+  isPrimary   Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+
+  customer    Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([phoneNumber])
+}
+
+model CustomerAddress {
+  id            String    @id @default(uuid())
+  customerId    String
+  villageId     String
+  areaId        String?
+  addressLine   String
+  landmark      String?
+  pincode       String?
+  isCurrent     Boolean   @default(true)
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  createdAt     DateTime  @default(now())
+
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  village       Village   @relation(fields: [villageId], references: [id])
+  area          Area?     @relation(fields: [areaId], references: [id])
+
+  @@index([customerId])
+  @@index([isCurrent])
+}
+
+model CustomerLocation {
+  id         String         @id @default(uuid())
+  customerId String
+  latitude   Float
+  longitude  Float
+  accuracy   Float?         // in meters
+  source     LocationSource @default(DEVICE_GPS)
+  capturedAt DateTime       @default(now())
+  capturedBy String
+  isPrimary  Boolean        @default(true)
+  createdAt  DateTime       @default(now())
+
+  customer   Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  actor      UserProfile    @relation("CapturedLocations", fields: [capturedBy], references: [id])
+
+  @@index([customerId])
+  @@index([capturedBy])
+}
+
+model MediaAsset {
+  id               String      @id @default(uuid())
+  provider         String      @default("CLOUDINARY")
+  publicId         String      @unique
+  resourceType     String
+  format           String
+  bytes            Int
+  width            Int?
+  height           Int?
+  secureUrl        String
+  folder           String
+  uploadedByUserId String
+  purpose          String      // e.g. CUSTOMER_PHOTO, IDENTITY_DOCUMENT
+  status           MediaStatus @default(ACTIVE)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  uploader         UserProfile       @relation("UploaderMediaAssets", fields: [uploadedByUserId], references: [id])
+  customerDocument CustomerDocument?
+
+  @@index([uploadedByUserId])
+  @@index([status])
+}
+
+model CustomerDocument {
+  id             String    @id @default(uuid())
+  customerId     String
+  mediaAssetId   String    @unique
+  documentType   DocType
+  documentNumber String?   // Masked format, e.g. XXXX-XXXX-1234
+  verifiedAt     DateTime?
+  verifiedBy     String?
+  createdAt      DateTime  @default(now())
+
+  customer       Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  mediaAsset     MediaAsset  @relation(fields: [mediaAssetId], references: [id], onDelete: Cascade)
+  verifier       UserProfile? @relation("VerifiedDocuments", fields: [verifiedBy], references: [id])
+
+  @@index([customerId])
+  @@index([documentType])
+}
+
+model Line {
+  id          String      @id @default(uuid())
+  name        String      // e.g. "Sunday Morning Line"
+  code        String      @unique // e.g. "SUN-AM"
+  weekday     Weekday
+  session     SessionType
+  description String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  customerLineAssignments CustomerLineAssignment[]
+  loanDisbursements       LoanDisbursement[]
+  payments                Payment[]
+  collectionSessions      CollectionSession[]
+  cashBag                 CashBag?
+
+  @@unique([weekday, session, name])
+  @@index([weekday])
+}
+
+model CustomerLineAssignment {
+  id            String    @id @default(uuid())
+  customerId    String
+  lineId        String
+  assignedBy    String
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  isCurrent     Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+
+  customer      Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  line          Line        @relation(fields: [lineId], references: [id])
+  assigner      UserProfile @relation("LineAssignedBy", fields: [assignedBy], references: [id])
+
+  @@index([customerId])
+  @@index([lineId])
+  @@index([isCurrent])
+}
+
+// ============================================================
+// MODULE 3: LOAN PRODUCTS, SCHEMES, APPROVALS & DISBURSEMENTS
+// ============================================================
+
+enum SchemeFrequency {
+  WEEKLY
+  MONTHLY
+}
+
+enum LoanStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+  PARTIALLY_DISBURSED
+  DISBURSED
+  ACTIVE
+  PAID
+  CANCELLED
+  DEFAULTED
+}
+
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
+enum DisbursementMode {
+  CASH
+  BANK_TRANSFER
+  UPI
+}
+
+enum InstallmentStatus {
+  PENDING
+  PARTIALLY_PAID
+  PAID
+  VOIDED
+}
+
+enum CancellationStatus {
+  PENDING_RECOVERY
+  SETTLED
+}
+
+enum PaymentMode {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CHEQUE
+}
+
+enum PaymentStatus {
+  CONFIRMED
+  REVERSED
+}
+
+enum AdvanceCreditType {
+  CREDIT
+  DEBIT_APPLIED
+  REFUND
+}
+
+enum SessionStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum VisitStatus {
+  NOT_VISITED
+  VISITED
+  COLLECTED
+  PARTIAL
+  NOT_AVAILABLE
+}
+
+model LoanScheme {
+  id          String          @id @default(uuid())
+  name        String          // e.g. "₹10,000 Weekly Scheme"
+  code        String          @unique // e.g. "W10K", "M10K", "W20K", "W5K"
+  frequency   SchemeFrequency
+  description String?
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  versions    LoanSchemeVersion[]
+  loans       Loan[]
+
+  @@index([code])
+}
+
+model LoanSchemeVersion {
+  id                      String   @id @default(uuid())
+  schemeId                String
+  versionNumber           Int
+  principalPaise          Int      // e.g. 1000000 for ₹10,000
+  totalFinanceChargePaise Int      // e.g. 250000 for ₹2,500
+  totalRepaymentPaise     Int      // e.g. 1250000 for ₹12,500
+  installmentCount        Int      // e.g. 25 or 6
+  effectiveFrom           DateTime @default(now())
+  effectiveTo             DateTime?
+  isActive                Boolean  @default(true)
+  createdAt               DateTime @default(now())
+
+  scheme           LoanScheme                  @relation(fields: [schemeId], references: [id], onDelete: Cascade)
+  installmentRules LoanSchemeInstallmentRule[]
+  loans            Loan[]
+
+  @@unique([schemeId, versionNumber])
+  @@index([schemeId])
+}
+
+model LoanSchemeInstallmentRule {
+  id                    String @id @default(uuid())
+  schemeVersionId       String
+  installmentNumber     Int
+  dueOffsetDays         Int    // e.g. 7, 14, 21... or 30, 60...
+  principalDuePaise     Int
+  financeChargeDuePaise Int
+  totalDuePaise         Int
+
+  schemeVersion LoanSchemeVersion @relation(fields: [schemeVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([schemeVersionId, installmentNumber])
+  @@index([schemeVersionId])
+}
+
+model Loan {
+  id                        String     @id @default(uuid())
+  loanNumber                String     @unique // e.g. VF-LN-10001
+  customerId                String
+  schemeId                  String
+  schemeVersionId           String
+  requestedPrincipalPaise   Int
+  sanctionedPrincipalPaise  Int
+  totalFinanceChargePaise   Int
+  totalRepaymentPaise       Int
+  status                    LoanStatus @default(DRAFT)
+  applicantId               String
+  notes                     String?
+  isOverlapping             Boolean    @default(false)
+  overlappingApprovalReason String?
+  createdAt                 DateTime   @default(now())
+  updatedAt                 DateTime   @updatedAt
+
+  customer         Customer              @relation(fields: [customerId], references: [id])
+  scheme           LoanScheme            @relation(fields: [schemeId], references: [id])
+  schemeVersion    LoanSchemeVersion     @relation(fields: [schemeVersionId], references: [id])
+  applicant        UserProfile           @relation("LoanApplicant", fields: [applicantId], references: [id])
+  approvals        LoanApproval[]
+  disbursements    LoanDisbursement[]
+  scheduleVersions LoanScheduleVersion[]
+  installments     LoanInstallment[]
+  cancellation     LoanCancellation?
+  payments         Payment[]
+  paymentAllocations PaymentAllocation[]
+  advanceCreditEntries CustomerAdvanceCreditEntry[]
+
+  @@index([customerId])
+  @@index([schemeId])
+  @@index([status])
+  @@index([applicantId])
+}
+
+model LoanApproval {
+  id            String           @id @default(uuid())
+  loanId        String
+  approverId    String
+  decision      ApprovalDecision
+  reason        String?
+  termsSnapshot Json             // Frozen terms snapshot at approval time
+  decidedAt     DateTime         @default(now())
+
+  loan     Loan        @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  approver UserProfile @relation("LoanApprover", fields: [approverId], references: [id])
+
+  @@index([loanId])
+  @@index([approverId])
+}
+
+model LoanDisbursement {
+  id                 String           @id @default(uuid())
+  loanId             String
+  disbursementNumber Int
+  amountPaise        Int
+  disbursedAt        DateTime         @default(now())
+  mode               DisbursementMode @default(CASH)
+  reference          String?          // UTR, cheque number, or receipt ref
+  disbursedBy        String
+  lineId             String?          // Collection Line if distributed on field route
+  cashBagId          String?          // Cash bag reference for Module 6
+  notes              String?
+  createdAt          DateTime         @default(now())
+
+  loan            Loan             @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  disburser       UserProfile      @relation("LoanDisburser", fields: [disbursedBy], references: [id])
+  line            Line?            @relation(fields: [lineId], references: [id])
+  cashBag         CashBag?         @relation(fields: [cashBagId], references: [id])
+  cashLedgerEntry CashLedgerEntry?
+
+  @@unique([loanId, disbursementNumber])
+  @@index([loanId])
+  @@index([disbursedBy])
+  @@index([cashBagId])
+}
+
+model LoanScheduleVersion {
+  id                      String   @id @default(uuid())
+  loanId                  String
+  versionNumber           Int      @default(1)
+  generatedAt             DateTime @default(now())
+  generatedReason         String   // e.g. "INITIAL_DISBURSEMENT"
+  totalPrincipalPaise     Int
+  totalFinanceChargePaise Int
+  totalRepaymentPaise     Int
+  isCurrent               Boolean  @default(true)
+
+  loan         Loan              @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  installments LoanInstallment[]
+
+  @@unique([loanId, versionNumber])
+  @@index([loanId])
+}
+
+model LoanInstallment {
+  id                     String            @id @default(uuid())
+  scheduleVersionId      String
+  loanId                 String
+  installmentNumber      Int
+  dueDate                DateTime
+  principalDuePaise      Int
+  financeChargeDuePaise  Int
+  totalDuePaise          Int
+  principalPaidPaise     Int               @default(0)
+  financeChargePaidPaise Int               @default(0)
+  totalPaidPaise         Int               @default(0)
+  status                 InstallmentStatus @default(PENDING)
+  paidAt                 DateTime?
+  createdAt              DateTime          @default(now())
+
+  scheduleVersion LoanScheduleVersion @relation(fields: [scheduleVersionId], references: [id], onDelete: Cascade)
+  loan            Loan                @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  allocations     PaymentAllocation[]
+
+  @@unique([scheduleVersionId, installmentNumber])
+  @@index([loanId])
+  @@index([dueDate])
+  @@index([status])
+}
+
+model LoanCancellation {
+  id                           String             @id @default(uuid())
+  loanId                       String             @unique
+  cancelledBy                  String
+  cancelledAt                  DateTime           @default(now())
+  reason                       String
+  disbursedPrincipalPaise      Int
+  repaidPrincipalPaise         Int
+  netRecoverablePrincipalPaise Int
+  status                       CancellationStatus @default(PENDING_RECOVERY)
+
+  loan       Loan                 @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  canceller  UserProfile          @relation("LoanCanceller", fields: [cancelledBy], references: [id])
+  recoveries RecoveryAllocation[]
+
+  @@index([loanId])
+  @@index([status])
+}
+
+model RecoveryAllocation {
+  id                 String   @id @default(uuid())
+  loanCancellationId String
+  amountPaise        Int
+  paymentReference   String?
+  recordedBy         String
+  recordedAt         DateTime @default(now())
+
+  cancellation LoanCancellation @relation(fields: [loanCancellationId], references: [id], onDelete: Cascade)
+  recorder     UserProfile      @relation("RecoveryRecorder", fields: [recordedBy], references: [id])
+
+  @@index([loanCancellationId])
+}
+
+model Payment {
+  id                     String        @id @default(uuid())
+  paymentNumber          String        @unique // e.g. VF-PAY-10001
+  loanId                 String
+  customerId             String
+  collectedById          String
+  lineId                 String?
+  amountPaise            Int
+  principalPaidPaise     Int           @default(0)
+  financeChargePaidPaise Int           @default(0)
+  advanceCreditPaise     Int           @default(0)
+  mode                   PaymentMode   @default(CASH)
+  reference              String?       // UTR, transaction ID, cheque number
+  status                 PaymentStatus @default(CONFIRMED)
+  notes                  String?
+  idempotencyKey         String?       @unique
+  collectedAt            DateTime      @default(now())
+  createdAt              DateTime      @default(now())
+
+  loan                 Loan                         @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  customer             Customer                     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  collectedBy          UserProfile                  @relation("PaymentCollector", fields: [collectedById], references: [id])
+  line                 Line?                        @relation(fields: [lineId], references: [id])
+  allocations          PaymentAllocation[]
+  reversal             PaymentReversal?
+  advanceCreditEntries CustomerAdvanceCreditEntry[]
+  collectionVisits     CollectionVisit[]
+  cashLedgerEntry      CashLedgerEntry?
+
+  @@index([loanId])
+  @@index([customerId])
+  @@index([collectedById])
+  @@index([collectedAt])
+  @@index([status])
+  @@index([idempotencyKey])
+}
+
+model PaymentAllocation {
+  id                 String   @id @default(uuid())
+  paymentId          String
+  loanId             String
+  installmentId      String
+  amountPaise        Int
+  principalPaise     Int
+  financeChargePaise Int
+  createdAt          DateTime @default(now())
+
+  payment     Payment         @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  loan        Loan            @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  installment LoanInstallment @relation(fields: [installmentId], references: [id], onDelete: Cascade)
+
+  @@index([paymentId])
+  @@index([loanId])
+  @@index([installmentId])
+}
+
+model CustomerAdvanceCreditEntry {
+  id           String            @id @default(uuid())
+  loanId       String
+  customerId   String
+  paymentId    String?
+  type         AdvanceCreditType @default(CREDIT)
+  amountPaise  Int
+  balancePaise Int
+  notes        String?
+  createdAt    DateTime          @default(now())
+
+  loan     Loan     @relation(fields: [loanId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  payment  Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([loanId])
+  @@index([customerId])
+  @@index([paymentId])
+}
+
+model PaymentReversal {
+  id           String   @id @default(uuid())
+  paymentId    String   @unique
+  reversedById String
+  reason       String
+  reversedAt   DateTime @default(now())
+
+  payment    Payment     @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  reversedBy UserProfile @relation("PaymentReverser", fields: [reversedById], references: [id])
+
+  @@index([paymentId])
+  @@index([reversedById])
+}
+
+// ============================================================
+// MODULE 5: LINES, DATED SESSIONS, VISITS & GPS
+// ============================================================
+
+model CollectionSession {
+  id            String        @id @default(uuid())
+  sessionNumber String        @unique // e.g. "SES-20261104-SUN-AM"
+  lineId        String
+  sessionDate   DateTime      // Target collection date
+  status        SessionStatus @default(PLANNED)
+  openedAt      DateTime?
+  closedAt      DateTime?
+  openedById    String?
+  closedById    String?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  line        Line                @relation(fields: [lineId], references: [id])
+  openedBy    UserProfile?        @relation("SessionOpener", fields: [openedById], references: [id])
+  closedBy    UserProfile?        @relation("SessionCloser", fields: [closedById], references: [id])
+  teamMembers SessionTeamMember[]
+  visits      CollectionVisit[]
+  gpsLogs     VisitGPSLog[]
+
+  @@unique([lineId, sessionDate])
+  @@index([lineId])
+  @@index([sessionDate])
+  @@index([status])
+}
+
+model SessionTeamMember {
+  id         String   @id @default(uuid())
+  sessionId  String
+  userId     String
+  role       String   @default("COLLECTOR") // e.g. "LEAD", "COLLECTOR"
+  assignedAt DateTime @default(now())
+
+  session CollectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    UserProfile       @relation(fields: [userId], references: [id])
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+  @@index([userId])
+}
+
+model CollectionVisit {
+  id          String      @id @default(uuid())
+  sessionId   String
+  customerId  String
+  collectorId String
+  status      VisitStatus @default(NOT_VISITED)
+  visitedAt   DateTime?
+  notes       String?
+  paymentId   String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  session   CollectionSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  customer  Customer          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  collector UserProfile       @relation("VisitCollector", fields: [collectorId], references: [id])
+  payment   Payment?          @relation(fields: [paymentId], references: [id])
+  gpsLogs   VisitGPSLog[]
+
+  @@unique([sessionId, customerId])
+  @@index([sessionId])
+  @@index([customerId])
+  @@index([collectorId])
+  @@index([status])
+}
+
+model VisitGPSLog {
+  id          String   @id @default(uuid())
+  sessionId   String?
+  visitId     String?
+  customerId  String?
+  collectorId String
+  latitude    Float
+  longitude   Float
+  accuracy    Float?   // in meters
+  capturedAt  DateTime @default(now())
+  deviceId    String?
+
+  session   CollectionSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  visit     CollectionVisit?   @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  customer  Customer?          @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  collector UserProfile        @relation("GPSCollector", fields: [collectorId], references: [id])
+
+  @@index([sessionId])
+  @@index([visitId])
+  @@index([customerId])
+  @@index([collectorId])
+  @@index([capturedAt])
+}
+
+// ==========================================
+// MODULE 6: CASH BAG, LEDGER, TRANSFERS, EXPENSES & RECONCILIATION
+// ==========================================
+
+enum LedgerEntryType {
+  OPENING
+  COLLECTION
+  LOAN_DISBURSEMENT
+  EXPENSE
+  ADDITIONAL_CASH_IN
+  WITHDRAWAL
+  BANK_DEPOSIT
+  TRANSFER_IN
+  TRANSFER_OUT
+  HANDOVER_OUT
+  HANDOVER_IN
+  REVERSAL
+  ADJUSTMENT
+}
+
+enum LedgerDirection {
+  IN
+  OUT
+}
+
+enum ReconciliationStatus {
+  BALANCED
+  SHORTAGE
+  EXCESS
+}
+
+enum ReconciliationApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum HandoverStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum ExpenseApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model CashBag {
+  id          String   @id @default(uuid())
+  name        String   // e.g. "Sunday Morning Line Bag" or "Main Vault"
+  code        String   @unique // e.g. "CB-SUN-AM" or "VAULT-MAIN"
+  lineId      String?  @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  line            Line?                @relation(fields: [lineId], references: [id])
+  openings        CashBagOpening[]
+  ledgerEntries   CashLedgerEntry[]
+  reconciliations CashReconciliation[]
+  handovers       CashHandover[]
+  expenses        Expense[]
+  disbursements   LoanDisbursement[]
+  transfersFrom   CashTransfer[]       @relation("TransferSource")
+  transfersTo     CashTransfer[]       @relation("TransferDestination")
+
+  @@index([lineId])
+  @@index([isActive])
+}
+
+model CashBagOpening {
+  id          String   @id @default(uuid())
+  cashBagId   String
+  openingDate DateTime // Normalized to date
+  amountPaise Int      // In paise
+  openedById  String
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  cashBag  CashBag     @relation(fields: [cashBagId], references: [id], onDelete: Cascade)
+  openedBy UserProfile @relation("CashBagOpener", fields: [openedById], references: [id])
+
+  @@unique([cashBagId, openingDate])
+  @@index([cashBagId])
+  @@index([openingDate])
+  @@index([openedById])
+}
+
+model CashLedgerEntry {
+  id                String          @id @default(uuid())
+  cashBagId         String
+  entryType         LedgerEntryType
+  direction         LedgerDirection
+  amountPaise       Int             // Strictly > 0
+  balanceAfterPaise Int             // Snapshot derived from previous entries + this entry
+  actorId           String
+  notes             String?
+  createdAt         DateTime        @default(now())
+
+  // Explicit foreign keys to source transactions
+  paymentId        String?         @unique
+  disbursementId   String?         @unique
+  expenseId        String?         @unique
+  transferId       String?
+  handoverId       String?
+  reconciliationId String?
+
+  cashBag        CashBag             @relation(fields: [cashBagId], references: [id], onDelete: Cascade)
+  actor          UserProfile         @relation("CashLedgerActor", fields: [actorId], references: [id])
+  payment        Payment?            @relation(fields: [paymentId], references: [id])
+  disbursement   LoanDisbursement?   @relation(fields: [disbursementId], references: [id])
+  expense        Expense?            @relation(fields: [expenseId], references: [id])
+  transfer       CashTransfer?       @relation(fields: [transferId], references: [id])
+  handover       CashHandover?       @relation(fields: [handoverId], references: [id])
+  reconciliation CashReconciliation? @relation(fields: [reconciliationId], references: [id])
+  partnerCapitalEntries PartnerCapitalEntry[]
+
+  @@index([cashBagId])
+  @@index([entryType])
+  @@index([direction])
+  @@index([actorId])
+  @@index([createdAt])
+  @@index([paymentId])
+  @@index([disbursementId])
+  @@index([expenseId])
+  @@index([transferId])
+}
+
+model CashReconciliation {
+  id                   String                       @id @default(uuid())
+  cashBagId            String
+  reconciledAt         DateTime                     @default(now())
+  reconciledById       String
+  expectedBalancePaise Int                          // Derived from ledger at reconciliation time
+  actualBalancePaise   Int                          // Physical cash count
+  differencePaise      Int                          // actual - expected
+  status               ReconciliationStatus
+  reason               String?                      // Mandatory if difference != 0
+  approvalStatus       ReconciliationApprovalStatus @default(PENDING)
+  approvedById         String?
+  approvedAt           DateTime?
+  approvalNotes        String?
+  createdAt            DateTime                     @default(now())
+
+  cashBag       CashBag           @relation(fields: [cashBagId], references: [id], onDelete: Cascade)
+  reconciledBy  UserProfile       @relation("ReconciliationPerformer", fields: [reconciledById], references: [id])
+  approvedBy    UserProfile?      @relation("ReconciliationApprover", fields: [approvedById], references: [id])
+  ledgerEntries CashLedgerEntry[]
+
+  @@index([cashBagId])
+  @@index([status])
+  @@index([approvalStatus])
+  @@index([reconciledAt])
+  @@index([reconciledById])
+}
+
+model CashTransfer {
+  id                   String   @id @default(uuid())
+  transferNumber       String   @unique // e.g. TRF-20261104-001
+  sourceCashBagId      String
+  destinationCashBagId String
+  amountPaise          Int      // Strictly > 0
+  initiatedById        String
+  notes                String?
+  createdAt            DateTime @default(now())
+
+  sourceCashBag      CashBag           @relation("TransferSource", fields: [sourceCashBagId], references: [id])
+  destinationCashBag CashBag           @relation("TransferDestination", fields: [destinationCashBagId], references: [id])
+  initiatedBy        UserProfile       @relation("TransferInitiator", fields: [initiatedById], references: [id])
+  ledgerEntries      CashLedgerEntry[]
+
+  @@index([sourceCashBagId])
+  @@index([destinationCashBagId])
+  @@index([initiatedById])
+  @@index([createdAt])
+}
+
+model CashHandover {
+  id              String         @id @default(uuid())
+  handoverNumber  String         @unique // e.g. HND-20261104-001
+  cashBagId       String
+  amountPaise     Int            // Strictly > 0
+  handedOverById  String
+  receivedById    String?
+  status          HandoverStatus @default(PENDING)
+  handedOverAt    DateTime       @default(now())
+  acknowledgedAt  DateTime?
+  notes           String?
+  createdAt       DateTime       @default(now())
+
+  cashBag       CashBag           @relation(fields: [cashBagId], references: [id], onDelete: Cascade)
+  handedOverBy  UserProfile       @relation("CashHandedOverBy", fields: [handedOverById], references: [id])
+  receivedBy    UserProfile?      @relation("CashReceivedBy", fields: [receivedById], references: [id])
+  ledgerEntries CashLedgerEntry[]
+
+  @@index([cashBagId])
+  @@index([handedOverById])
+  @@index([receivedById])
+  @@index([status])
+  @@index([handedOverAt])
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g. "Fuel & Travel", "Tea & Refreshments", "Office Stationery"
+  code        String   @unique // e.g. "FUEL", "REFRESHMENT", "STATIONERY"
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  expenses    Expense[]
+
+  @@index([isActive])
+}
+
+model Expense {
+  id             String                @id @default(uuid())
+  expenseNumber  String                @unique // e.g. EXP-20261104-001
+  cashBagId      String
+  categoryId     String
+  amountPaise    Int                   // Strictly > 0
+  recordedById   String
+  expenseDate    DateTime              @default(now())
+  description    String
+  receiptUrl     String?
+  approvalStatus ExpenseApprovalStatus @default(PENDING)
+  approvedById   String?
+  approvedAt     DateTime?
+  isSelfApproved Boolean               @default(false)
+  notes          String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  cashBag     CashBag          @relation(fields: [cashBagId], references: [id], onDelete: Cascade)
+  category    ExpenseCategory  @relation(fields: [categoryId], references: [id])
+  recordedBy  UserProfile      @relation("ExpenseRecorder", fields: [recordedById], references: [id])
+  approvedBy  UserProfile?     @relation("ExpenseApprover", fields: [approvedById], references: [id])
+  ledgerEntry CashLedgerEntry?
+
+  @@index([cashBagId])
+  @@index([categoryId])
+  @@index([recordedById])
+  @@index([approvalStatus])
+  @@index([expenseDate])
+}
+
+// ============================================================
+// MODULE 7: PARTNERS, CAPITAL, PROFIT & LOSS DISTRIBUTIONS
+// ============================================================
+
+enum PartnerStatus {
+  ACTIVE
+  INACTIVE
+  EXITED
+}
+
+enum CapitalEntryType {
+  INITIAL_CONTRIBUTION
+  ADDITIONAL_CONTRIBUTION
+  CAPITAL_WITHDRAWAL
+  CAPITAL_ADJUSTMENT
+}
+
+enum WithdrawalType {
+  CAPITAL_WITHDRAWAL
+  PROFIT_DRAWING
+}
+
+enum WithdrawalStatus {
+  PENDING
+  APPROVED
+  PAID
+  REJECTED
+}
+
+enum PeriodStatus {
+  OPEN
+  CALCULATED
+  APPROVED
+  DISTRIBUTED
+  ALLOCATED
+  CLOSED
+  CANCELLED
+}
+
+enum DistributionStatus {
+  DRAFT
+  POSTED
+  CANCELLED
+}
+
+enum DistributionPaymentStatus {
+  PENDING
+  PAID
+}
+
+model Partner {
+  id            String        @id @default(uuid())
+  userProfileId String?       @unique
+  partnerCode   String        @unique // e.g. "PRT-001"
+  name          String
+  phone         String?
+  email         String?
+  status        PartnerStatus @default(ACTIVE)
+  joinDate      DateTime      @default(now())
+  exitDate      DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  userProfile           UserProfile?               @relation("UserPartnerProfile", fields: [userProfileId], references: [id])
+  capitalEntries        PartnerCapitalEntry[]
+  ratios                PartnerRatio[]
+  withdrawals           PartnerWithdrawal[]
+  distributionDetails   ProfitDistributionDetail[]
+  lossAllocationDetails LossAllocationDetail[]
+
+  @@index([status])
+  @@index([partnerCode])
+}
+
+model PartnerCapitalEntry {
+  id                String           @id @default(uuid())
+  entryNumber       String           @unique // e.g. "CAP-20261104-001"
+  partnerId         String
+  entryType         CapitalEntryType
+  amountPaise       Int              // positive integer minor units
+  paymentMode       PaymentMode      @default(BANK_TRANSFER)
+  reference         String?
+  effectiveDate     DateTime         @default(now())
+  notes             String?
+  recordedById      String
+  cashLedgerEntryId String?          // Separate link if deposited into cash bag/vault
+  createdAt         DateTime         @default(now())
+
+  partner          Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  recordedBy       UserProfile        @relation("CapitalRecorder", fields: [recordedById], references: [id])
+  cashLedgerEntry  CashLedgerEntry?   @relation(fields: [cashLedgerEntryId], references: [id])
+  linkedWithdrawal PartnerWithdrawal?
+
+  @@index([partnerId])
+  @@index([entryType])
+  @@index([effectiveDate])
+}
+
+model PartnerRatio {
+  id            String    @id @default(uuid())
+  partnerId     String
+  capitalRatio  Decimal   @db.Decimal(7, 4) // e.g. 50.0000 %
+  profitRatio   Decimal   @db.Decimal(7, 4) // e.g. 50.0000 %
+  lossRatio     Decimal   @db.Decimal(7, 4) // e.g. 50.0000 %
+  effectiveFrom DateTime  @default(now())
+  effectiveTo   DateTime?
+  notes         String?
+  createdById   String
+  createdAt     DateTime  @default(now())
+
+  partner   Partner     @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  createdBy UserProfile @relation("RatioCreator", fields: [createdById], references: [id])
+
+  @@index([partnerId])
+  @@index([effectiveFrom])
+  @@index([effectiveTo])
+}
+
+model PartnerWithdrawal {
+  id               String           @id @default(uuid())
+  withdrawalNumber String           @unique // e.g. "WTH-20261104-001"
+  partnerId        String
+  amountPaise      Int              // strictly > 0
+  withdrawalType   WithdrawalType   @default(CAPITAL_WITHDRAWAL)
+  status           WithdrawalStatus @default(PENDING)
+  requestedAt      DateTime         @default(now())
+  approvedById     String?
+  approvedAt       DateTime?
+  paidAt           DateTime?
+  paymentMode      PaymentMode?
+  reference        String?
+  notes            String?
+  capitalEntryId   String?          @unique // Created and linked only when status transitions to PAID
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  partner      Partner              @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  approvedBy   UserProfile?         @relation("WithdrawalApprover", fields: [approvedById], references: [id])
+  capitalEntry PartnerCapitalEntry? @relation(fields: [capitalEntryId], references: [id])
+
+  @@index([partnerId])
+  @@index([status])
+  @@index([withdrawalType])
+}
+
+model ProfitPeriod {
+  id                               String       @id @default(uuid())
+  periodCode                       String       @unique // e.g. "PRF-202611"
+  name                             String
+  startDate                        DateTime
+  endDate                          DateTime
+  status                           PeriodStatus @default(OPEN)
+  totalFinanceChargeCollectedPaise Int          @default(0) // Operating Revenue
+  totalPrincipalRecoveredPaise     Int          @default(0) // Excluded from Profit!
+  totalApprovedExpensesPaise       Int          @default(0) // Operating Expenses
+  netProfitPaise                   Int          @default(0) // Revenue - Expenses
+  retainedEarningsPaise            Int          @default(0) // Reserves retained
+  distributableProfitPaise         Int          @default(0) // netProfit - retained
+  calculationPolicy                String?      @default("CASH_BASIS_COLLECTED_CHARGES")
+  closedById                       String?
+  closedAt                         DateTime?
+  approvedById                     String?
+  approvedAt                       DateTime?
+  notes                            String?
+  createdAt                        DateTime     @default(now())
+  updatedAt                        DateTime     @updatedAt
+
+  closedBy           UserProfile?        @relation("ProfitPeriodCloser", fields: [closedById], references: [id])
+  approvedBy         UserProfile?        @relation("ProfitPeriodApprover", fields: [approvedById], references: [id])
+  profitDistribution ProfitDistribution?
+
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+}
+
+model ProfitDistribution {
+  id                    String             @id @default(uuid())
+  distributionNumber    String             @unique // e.g. "DST-202611-001"
+  profitPeriodId        String             @unique
+  totalDistributedPaise Int
+  distributionDate      DateTime           @default(now())
+  status                DistributionStatus @default(DRAFT)
+  postedById            String
+  notes                 String?
+  createdAt             DateTime           @default(now())
+
+  profitPeriod ProfitPeriod               @relation(fields: [profitPeriodId], references: [id], onDelete: Cascade)
+  postedBy     UserProfile                @relation("ProfitDistributionPoster", fields: [postedById], references: [id])
+  details      ProfitDistributionDetail[]
+
+  @@index([status])
+  @@index([distributionDate])
+}
+
+model ProfitDistributionDetail {
+  id                   String                    @id @default(uuid())
+  profitDistributionId String
+  partnerId            String
+  profitRatioSnapshot  Decimal                   @db.Decimal(7, 4) // Immutable snapshot
+  calculatedSharePaise Int
+  allocatedSharePaise  Int
+  paymentStatus        DistributionPaymentStatus @default(PENDING)
+  paidAt               DateTime?
+  paymentMode          PaymentMode?
+  reference            String?
+  notes                String?
+
+  profitDistribution ProfitDistribution @relation(fields: [profitDistributionId], references: [id], onDelete: Cascade)
+  partner            Partner            @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([profitDistributionId])
+  @@index([partnerId])
+  @@index([paymentStatus])
+}
+
+model LossPeriod {
+  id             String         @id @default(uuid())
+  periodCode     String         @unique // e.g. "LSS-202611"
+  name           String
+  startDate      DateTime
+  endDate        DateTime
+  status         PeriodStatus   @default(OPEN)
+  totalLossPaise Int            @default(0)
+  approvedById   String?
+  approvedAt     DateTime?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  approvedBy     UserProfile?    @relation("LossPeriodApprover", fields: [approvedById], references: [id])
+  lossAllocation LossAllocation?
+
+  @@index([status])
+  @@index([startDate])
+  @@index([endDate])
+}
+
+model LossAllocation {
+  id                  String             @id @default(uuid())
+  allocationNumber    String             @unique // e.g. "LSA-202611-001"
+  lossPeriodId        String             @unique
+  totalAllocatedPaise Int
+  allocationDate      DateTime           @default(now())
+  status              DistributionStatus @default(DRAFT)
+  postedById          String
+  notes               String?
+  createdAt           DateTime           @default(now())
+
+  lossPeriod LossPeriod             @relation(fields: [lossPeriodId], references: [id], onDelete: Cascade)
+  postedBy   UserProfile            @relation("LossAllocationPoster", fields: [postedById], references: [id])
+  details    LossAllocationDetail[]
+
+  @@index([status])
+  @@index([allocationDate])
+}
+
+model LossAllocationDetail {
+  id                 String  @id @default(uuid())
+  lossAllocationId   String
+  partnerId          String
+  lossRatioSnapshot  Decimal @db.Decimal(7, 4) // Immutable snapshot
+  allocatedLossPaise Int
+  notes              String?
+
+  lossAllocation LossAllocation @relation(fields: [lossAllocationId], references: [id], onDelete: Cascade)
+  partner        Partner        @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([lossAllocationId])
+  @@index([partnerId])
+}
+
+// ============================================================
+// MODULE 8: NOTIFICATIONS & SYSTEM ALERTS
+// ============================================================
+
+enum NotificationType {
+  INFO
+  ALERT
+  APPROVAL_REQUEST
+  DISCREPANCY
+  SYSTEM
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String?          // null means broadcast to all admins/managers
+  title     String
+  message   String
+  type      NotificationType @default(INFO)
+  link      String?
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+  metadata  Json?            @default("{}")
+  createdAt DateTime         @default(now())
+
+  user      UserProfile?     @relation("UserNotifications", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([type])
+}
+
+// Module 9: Offline Sync Conflicts & Discrepancies
+enum SyncConflictStatus {
+  PENDING
+  RESOLVED
+  REJECTED
+}
+
+model SyncConflict {
+  id              String             @id @default(uuid())
+  clientSyncId    String             @unique // client idempotency key or local sync UUID
+  entityType      String             // "PAYMENT", "EXPENSE", "VISIT"
+  entityId        String?            // Loan ID or target entity ID
+  collectorId     String
+  deviceId        String?
+  conflictReason  String
+  payload         Json               // Client mutation payload snapshot
+  status          SyncConflictStatus @default(PENDING)
+  resolvedById    String?
+  resolvedAt      DateTime?
+  resolutionNotes String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  collector       UserProfile        @relation("CollectorSyncConflicts", fields: [collectorId], references: [id])
+  resolver        UserProfile?       @relation("ResolvedSyncConflicts", fields: [resolvedById], references: [id])
+
+  @@index([collectorId])
+  @@index([status])
+  @@index([entityType])
+}
+
+

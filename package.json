@@ -1,0 +1,54 @@
+{
+  "name": "village-finance",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "@/*": "./src/*"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "node tests/module-01-users-roles.test.js",
+    "test:module-1": "node tests/module-01-users-roles.test.js",
+    "test:module-2": "node --env-file=.env.local tests/module-02-customers.test.js",
+    "test:module-3": "node --env-file=.env.local tests/module-03-loans.test.js",
+    "test:module-4": "node --env-file=.env.local tests/module-04-payments.test.js",
+    "test:module-5": "node --env-file=.env.local tests/module-05-collections.test.js",
+    "test:module-6": "node --env-file=.env.local tests/module-06-cash.test.js",
+    "test:module-7": "node --env-file=.env.local tests/module-07-partners.test.js",
+    "test:module-8": "node --env-file=.env.local tests/module-08-reports.test.js",
+    "test:module-9": "node --env-file=.env.local tests/module-09-offline-sync.test.js",
+    "test:all": "node tests/module-01-users-roles.test.js && node --env-file=.env.local tests/module-02-customers.test.js && node --env-file=.env.local tests/module-03-loans.test.js && node --env-file=.env.local tests/module-04-payments.test.js && node --env-file=.env.local tests/module-05-collections.test.js && node --env-file=.env.local tests/module-06-cash.test.js && node --env-file=.env.local tests/module-07-partners.test.js && node --env-file=.env.local tests/module-08-reports.test.js && node --env-file=.env.local tests/module-09-offline-sync.test.js",
+    "seed": "node --env-file=.env.local prisma/seed.js",
+    "bootstrap:admin": "node --env-file=.env.local scripts/bootstrap-admin.js"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.10.1",
+    "@prisma/client": "^7.10.1",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "cloudinary": "^2.11.0",
+    "date-fns": "^4.4.0",
+    "dexie": "^4.4.7",
+    "lucide-react": "^1.68.0",
+    "next": "16.4.5",
+    "next-cloudinary": "^7.0.0",
+    "pg": "^8.23.1",
+    "prisma": "^7.10.1",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "recharts": "^3.10.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.4",
+    "@tailwindcss/turbopack": "^4",
+    "babel-plugin-react-compiler": "1.0.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.5",
+    "tailwindcss": "^4"
+  }
+}
