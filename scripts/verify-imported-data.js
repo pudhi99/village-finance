@@ -1,54 +1,52 @@
 import prisma from '../src/lib/prisma.js';
-import { paiseToRupees } from '../src/lib/money/index.js';
 
-async function main() {
+async function verify() {
   console.log('=== VERIFYING IMPORTED PRODUCTION DATA ===\n');
 
-  const [villages, areas, lines, cashBags, customers, loans, installments, payments, sessions, ledgerEntries] = await Promise.all([
-    prisma.village.findMany({ include: { areas: true } }),
-    prisma.area.findMany(),
-    prisma.line.findMany(),
-    prisma.cashBag.findMany(),
-    prisma.customer.findMany({ include: { village: true, area: true, phones: true, loans: true } }),
-    prisma.loan.findMany({ include: { scheme: true, installments: true, payments: true } }),
-    prisma.loanInstallment.findMany(),
-    prisma.payment.findMany({ include: { customer: true, allocations: true } }),
-    prisma.collectionSession.findMany({ include: { visits: true } }),
-    prisma.cashLedgerEntry.findMany({ orderBy: { createdAt: 'desc' }, take: 5 }),
-  ]);
-
-  console.log(`Villages (${villages.length}):`, villages.map(v => `${v.name} (${v.code})`).join(', '));
-  console.log(`Areas (${areas.length}):`, areas.map(a => a.name).join(', '));
-  console.log(`Lines (${lines.length}):`, lines.map(l => `${l.name} (${l.code})`).join(', '));
-  console.log(`Cash Bags (${cashBags.length}):`, cashBags.map(b => `${b.name} (${b.code})`).join(', '));
-  console.log(`Customers: ${customers.length}`);
-  console.log(`Loans: ${loans.length}`);
-  console.log(`Installments: ${installments.length}`);
-  console.log(`Payments: ${payments.length}`);
-  console.log(`Sessions: ${sessions.length}`);
-
-  const totalSanctionedPaise = loans.reduce((acc, l) => acc + l.sanctionedPrincipalPaise, 0);
-  const totalRepaymentPaise = loans.reduce((acc, l) => acc + l.totalRepaymentPaise, 0);
-  const totalPaidPaise = payments.reduce((acc, p) => acc + p.amountPaise, 0);
-
-  console.log(`\nPortfolio Financials:`);
-  console.log(`- Total Sanctioned Principal: ₹${paiseToRupees(totalSanctionedPaise).toLocaleString('en-IN')}`);
-  console.log(`- Total Scheduled Repayment: ₹${paiseToRupees(totalRepaymentPaise).toLocaleString('en-IN')}`);
-  console.log(`- Total Repayments Collected: ₹${paiseToRupees(totalPaidPaise).toLocaleString('en-IN')}`);
-
-  console.log(`\nCollection Sessions:`);
-  for (const s of sessions) {
-    const sPayments = payments.filter(p => p.collectedAt.toISOString().slice(0, 10) === s.sessionDate.toISOString().slice(0, 10));
-    const sTotal = sPayments.reduce((acc, p) => acc + p.amountPaise, 0);
-    console.log(`- ${s.sessionNumber} (${s.sessionDate.toISOString().slice(0, 10)}): ${sPayments.length} payments, ₹${paiseToRupees(sTotal).toLocaleString('en-IN')}, ${s.visits.length} visits logged`);
-  }
-
-  console.log('\nTop 5 Sample Customers:');
-  customers.slice(0, 5).forEach((c, idx) => {
-    const loan = c.loans[0];
-    const phone = c.phones[0]?.phoneNumber || 'None';
-    console.log(`${idx + 1}. [${c.customerNumber}] ${c.fullName} | Village: ${c.village.name} | Phone: ${phone} | Loan: ₹${loan ? paiseToRupees(loan.totalRepaymentPaise) : 0}`);
+  // 1. Sessions
+  const sessions = await prisma.collectionSession.findMany({
+    include: {
+      visits: { include: { payment: true } },
+      line: true,
+    },
+    orderBy: { sessionDate: 'asc' },
   });
+
+  console.log('--- Collection Sessions ---');
+  sessions.forEach(s => {
+    const totalCollected = s.visits.reduce((acc, v) => acc + (v.payment?.amountPaise || 0), 0) / 100;
+    const collectedVisits = s.visits.filter(v => v.status === 'COLLECTED').length;
+    const missedVisits = s.visits.filter(v => v.status === 'NOT_AVAILABLE').length;
+    console.log(`[${s.sessionDate.toISOString().slice(0, 10)}] ${s.sessionNumber}: Collected ₹${totalCollected.toLocaleString('en-IN')} | Visits: ${s.visits.length} (${collectedVisits} Paid, ${missedVisits} Missed)`);
+  });
+
+  // 2. Partners
+  console.log('\n--- Partners & Capital ---');
+  const partners = await prisma.partner.findMany({
+    include: { capitalEntries: true },
+  });
+  partners.forEach(p => {
+    const totalCap = p.capitalEntries.reduce((sum, c) => sum + c.amountPaise, 0) / 100;
+    console.log(`${p.name} (${p.partnerCode}): Total Capital ₹${totalCap.toLocaleString('en-IN')} across ${p.capitalEntries.length} entries`);
+  });
+
+  // 3. Cash Bag
+  console.log('\n--- Cash Bag & Ledger ---');
+  const bags = await prisma.cashBag.findMany({
+    include: {
+      ledgerEntries: { orderBy: { createdAt: 'desc' }, take: 1 },
+    },
+  });
+  bags.forEach(b => {
+    const lastEntry = b.ledgerEntries[0];
+    console.log(`${b.name} (${b.code}): Balance ₹${((lastEntry?.balanceAfterPaise || 0) / 100).toLocaleString('en-IN')}`);
+  });
+
+  // 4. Customers
+  const totalCust = await prisma.customer.count();
+  const edlCust = await prisma.customer.count({ where: { village: { code: 'VIL-EDL' } } });
+  const ktpCust = await prisma.customer.count({ where: { village: { code: 'VIL-KTP' } } });
+  console.log(`\n--- Customers Total: ${totalCust} (Edurlanka: ${edlCust}, Kothapalli: ${ktpCust}) ---`);
 }
 
-main().catch(console.error).finally(() => process.exit(0));
+verify().catch(console.error).finally(() => prisma.$disconnect());

@@ -39,6 +39,18 @@ async function cleanAllData() {
   const reconciliationsDeleted = await prisma.cashReconciliation.deleteMany({});
   console.log(`✓ Deleted ${reconciliationsDeleted.count} Cash Reconciliations`);
 
+  const partnerCapsDeleted = await prisma.partnerCapitalEntry.deleteMany({});
+  console.log(`✓ Deleted ${partnerCapsDeleted.count} Partner Capital Entries`);
+
+  const partnerRatiosDeleted = await prisma.partnerRatio.deleteMany({});
+  console.log(`✓ Deleted ${partnerRatiosDeleted.count} Partner Ratios`);
+
+  const partnerWithdrawalsDeleted = await prisma.partnerWithdrawal.deleteMany({});
+  console.log(`✓ Deleted ${partnerWithdrawalsDeleted.count} Partner Withdrawals`);
+
+  const partnersDeleted = await prisma.partner.deleteMany({});
+  console.log(`✓ Deleted ${partnersDeleted.count} Partners`);
+
   const openingsDeleted = await prisma.cashBagOpening.deleteMany({});
   console.log(`✓ Deleted ${openingsDeleted.count} Cash Bag Openings`);
 
