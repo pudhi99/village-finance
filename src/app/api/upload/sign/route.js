@@ -22,6 +22,9 @@ import { generateUploadSignature } from '@/lib/cloudinary';
 import { validate, z } from '@/lib/validation';
 import { randomUUID } from 'crypto';
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const UPLOAD_PURPOSES = {
   'customer-photo': {
     subfolder: 'customer-photos',
